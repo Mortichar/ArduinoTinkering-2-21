@@ -114,7 +114,6 @@ struct LcdDisplay {
     enum RwMode { READ, WRITE };
     enum CmdMode { DATA, INSTRUCTION };
     enum AddrMode { INCREMENT, DECREMENT };
-    enum LineNumber { ONE, TWO };
     enum FontSize { SMALL, LARGE };
 
   private:
@@ -134,9 +133,12 @@ struct LcdDisplay {
     //! Clock/latch pin
     uint8_t pinLatch;
     //! Number of lines currently configured for
-    LineNumber numLines = TWO;
+    uint8_t numLines = 2;
     //! Font size configured for
     FontSize fontType = SMALL;
+    bool showCursor = true;
+    bool blinkCursor = true;
+    bool displayOn = true;
 
   public:
     LcdDisplay(uint8_t pinD0, uint8_t pinD1, uint8_t pinD2, uint8_t pinD3,
@@ -181,13 +183,21 @@ struct LcdDisplay {
         digitalWrite(pinD5, ((data >> 5) & 0x01));
         digitalWrite(pinD6, ((data >> 6) & 0x01));
         digitalWrite(pinD7, ((data >> 7) & 0x01));
+        _NOP();
         digitalWrite(LCD_LATCH, HIGH);
+        _NOP();
+        _NOP();
+        _NOP();
+        _NOP();
+        _NOP();
+        _NOP();
+        _NOP();
         digitalWrite(LCD_LATCH, LOW);
     }
 
     void goHome() {}
 
-    void init() {
+    void muxPins() {
         pinMode(pinD0, OUTPUT);
         pinMode(pinD1, OUTPUT);
         pinMode(pinD2, OUTPUT);
@@ -199,13 +209,75 @@ struct LcdDisplay {
         pinMode(pinLatch, OUTPUT);
         pinMode(pinRs, OUTPUT);
         pinMode(pinRw, OUTPUT);
-        delay(10);
+    }
+
+    void init() {
+        muxPins();
+        delay(1);
+        updateControl();
+        updateFont();
+    }
+
+  private:
+    void updateControl() {
         muxCmd(INSTRUCTION);
         muxRw(WRITE);
-        // Display ON
-        writeByte(0x0F);
-        // 2 Line Small Font
-        writeByte(0x58);
+        uint8_t command = 0x08;
+        if (displayOn) {
+            command |= 0x04;
+        }
+        if (showCursor) {
+            command |= 0x02;
+        }
+        if (blinkCursor) {
+            command |= 0x01;
+        }
+        writeByte(command);
+        delay(1);
+    }
+
+    void updateFont() {
+        muxCmd(INSTRUCTION);
+        muxRw(WRITE);
+        // 8 bit interface
+        uint8_t command = 0x30;
+        if (numLines == 2) {
+            command |= 0x08;
+        }
+        if (fontType == LARGE) {
+            command |= 0x04;
+        }
+        writeByte(command);
+    }
+
+  public:
+    void power(bool on) {
+        displayOn = on;
+        updateControl();
+    }
+    void lines(uint8_t nlines) {
+        numLines = nlines;
+        updateFont();
+    }
+    void fontSize(FontSize size) {
+        fontType = size;
+        updateFont();
+    }
+    void writeText(uint8_t line, uint8_t pos, const char *str) {
+        muxCmd(INSTRUCTION);
+        muxRw(WRITE);
+        uint8_t command = 0x80;
+        if (line) {
+            command |= 0x40;
+        }
+        command |= min(pos, 0x27);
+        // move cursor to line, pos
+        writeByte(command);
+        muxCmd(DATA);
+        // write text
+        for (auto i = 0u; i < min(strlen(str), 40 - pos); i++) {
+            writeByte(str[i]);
+        }
     }
 };
 
@@ -219,9 +291,11 @@ auto helloWorldIndex = 0;
 auto lastStart = millis();
 
 void setup() {
-    lcdDisplay.init();
+    pinMode(JOYSTICK_SW, INPUT);
     ledDisplay.init();
-    lcdDisplay.muxCmd(LcdDisplay::DATA);
+    lcdDisplay.init();
+    lcdDisplay.writeText(0, 5, "Howdy");
+    lcdDisplay.writeText(1, 5, "Partner");
 }
 
 void loop() {
@@ -249,13 +323,6 @@ void loop() {
         ledDisplay.setPixel(player, true);
         // draw current framebuffer to display
         ledDisplay.update();
-        auto joystickSw = digitalRead(JOYSTICK_SW);
-        if (joystickSw) {
-            lcdDisplay.writeByte(HELLO_WORLD_STR[helloWorldIndex++]);
-            if (helloWorldIndex >= HELLO_WORLD_LEN) {
-                helloWorldIndex = 0;
-            }
-        }
         return;
     }
 }
