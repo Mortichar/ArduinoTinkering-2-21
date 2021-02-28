@@ -14,14 +14,19 @@
 #define NUM_ROWS (8)
 
 template <typename T> struct Point {
+    // x coordinate
     T x;
+    // y coordinate
     T y;
+    // construct a point
     Point<T>(const T &xIn, const T &yIn) : x(xIn), y(yIn) {}
+    // add two points
     Point &operator+(const Point &rhs) {
         x += rhs.x;
         y += rhs.y;
         return *this;
     }
+    // subtract two points
     Point &operator-(const Point &rhs) {
         x -= rhs.x;
         y -= rhs.y;
@@ -31,15 +36,20 @@ template <typename T> struct Point {
 
 struct LedDisplay {
   private:
+    // pin number for clock signal
     uint8_t pinClock;
+    // pin number for data signal
     uint8_t pinData;
+    // pin number for chip select
     uint8_t pinChipSelect;
+    // internal framebuffer
     uint8_t data[8];
 
   public:
+    // construct and led display handle
     LedDisplay(uint8_t pinClock, uint8_t pinData, uint8_t pinChipSelect)
         : pinClock(pinClock), pinData(pinData), pinChipSelect(pinChipSelect) {}
-
+    // write a byte to the display
     void writeByte(uint8_t data) {
         digitalWrite(CS_PIN, LOW);
         for (uint8_t i = 0; i < 8; i++) {
@@ -49,7 +59,7 @@ struct LedDisplay {
             digitalWrite(pinClock, HIGH);
         }
     }
-
+    // write an address and data byte pair
     void writeAddressAndByte(uint8_t addr, uint8_t data) {
         digitalWrite(pinChipSelect, LOW);
         writeByte(addr);
@@ -57,8 +67,10 @@ struct LedDisplay {
         digitalWrite(pinChipSelect, HIGH);
     }
 
+    // clear framebuffer
     void clear() { memset(data, 0, sizeof(data)); }
 
+    // mux all pins and initialize hardware
     void init() {
         pinMode(pinChipSelect, OUTPUT);
         pinMode(pinData, OUTPUT);
@@ -74,6 +86,7 @@ struct LedDisplay {
         clear();
     }
 
+    // set pixel to on (true) or off (false) in framebuffer
     template <typename T> void setPixel(T x, T y, bool state) {
         if (x >= 0 && x < NUM_COLUMNS && y >= 0 && y < NUM_ROWS) {
             if (state) {
@@ -84,10 +97,12 @@ struct LedDisplay {
         }
     }
 
+    // set pixel with a point, calls other setPixel overload
     template <typename T> void setPixel(const T &point, bool state) {
         setPixel(point.x, point.y, state);
     }
 
+    // update the hardware with the framebuffer
     void update() {
         for (auto i = 0; i < NUM_ROWS; i++) {
             writeAddressAndByte((uint8_t)(i + 1), data[i]);
@@ -96,16 +111,23 @@ struct LedDisplay {
 };
 
 struct Square {
+    // construct a square
     Square(const Point<int16_t> &start, LedDisplay &context)
         : start(start), context(context) {}
+    // the maximum radius of a square
     static constexpr int16_t MAX_RADIUS = 8;
+    // starting location
     Point<int16_t> start;
+    // current radius of expansion
     int16_t currentRadius = 0;
+    // reference to display to display square on
     LedDisplay &context;
+    // reset the square with a new starting point
     void reset(const Point<int16_t> newStart) {
         start = newStart;
         currentRadius = 0;
     }
+    // expand the square one tile if still expanding, update pixels in display
     void update() {
         if (currentRadius && currentRadius < MAX_RADIUS) {
             for (auto x = start.x - currentRadius; x < start.x + currentRadius;
@@ -143,17 +165,30 @@ struct Square {
     }
 };
 
+// a point to represent the player moved by joystick
 auto player = Point<int16_t>(3, 3);
+// a display object that modifies the hardware as it is changed
 auto ledDisplay = LedDisplay(CLK_PIN, DATA_PIN, CS_PIN);
+// a variable used to track when the last frame started, so that it doesn't run
+// too fast and just looks/feels better
 auto lastStart = millis();
+// a square, initialized with the same start and the play and a reference to the
+// display
 auto squareEntity = Square(player, ledDisplay);
 
+// setup the hardware, by setting the joystick as an input and initialized the
+// display
 void setup() {
     pinMode(JOYSTICK_SW, INPUT_PULLUP);
     ledDisplay.init();
 }
+
+// this code runs in an infinite loop
 void loop() {
-    if (millis() > lastStart + 125) {
+    // if at least 125 ms have passed
+    if (millis() >
+        lastStart + 125) { // millis gets current time in milliseconds. It
+                           // starts at 0 when the board turns on.
         // get start of this frame
         lastStart = millis();
         // clear current framebuffer
@@ -173,12 +208,19 @@ void loop() {
         } else if (joystickY < JOYSTICK_LOW_THRESHOLD && (player.y > 0)) {
             player.y--;
         }
+        // read the joystick, is it currently pressed down enough to engage the
+        // switch?
         auto joystickSw = digitalRead(JOYSTICK_SW);
+        // the joystick signal is "low" when the switch is pressed
         if (!joystickSw) {
+            // because it is low, reset the square with the current position of
+            // the player point
             squareEntity.reset(player);
         }
+        // update the square, expanding it if it is still expanding, or doing
+        // nothing
         squareEntity.update();
-        // highlight player
+        // re-highlight player
         ledDisplay.setPixel(player, true);
         // draw current framebuffer to display
         ledDisplay.update();
